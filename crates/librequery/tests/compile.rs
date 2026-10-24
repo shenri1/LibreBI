@@ -45,9 +45,8 @@ fn exemplo_da_especificacao_gera_cadeia_de_ctes() {
 WITH s0 AS (SELECT * FROM \"src_arquivo_vendas\"),
      s1 AS (SELECT \"data\", \"produto_id\", \"qtd\", \"preco\" FROM s0),
      s2 AS (SELECT * EXCEPT (\"data\"), CAST(\"data\" AS DATE) AS \"data\" FROM s1),
-     s3 AS (SELECT *, qtd * preco AS \"valor\" FROM s2),
-     s4 AS (SELECT * FROM s3 WHERE qtd > 0)
-SELECT * FROM s4";
+     s3 AS (SELECT *, qtd * preco AS \"valor\" FROM s2)
+SELECT * FROM s3 WHERE qtd > 0";
 
     assert_eq!(compile(&query).unwrap(), expected);
 }
@@ -71,9 +70,8 @@ fn remove_columns_usa_except() {
     );
 
     let expected = "\
-WITH s0 AS (SELECT * FROM \"vendas\"),
-     s1 AS (SELECT * EXCEPT (\"senha\", \"nota\") FROM s0)
-SELECT * FROM s1";
+WITH s0 AS (SELECT * FROM \"vendas\")
+SELECT * EXCEPT (\"senha\", \"nota\") FROM s0";
 
     assert_eq!(compile(&query).unwrap(), expected);
 }
@@ -89,9 +87,8 @@ fn rename_columns_troca_cada_coluna() {
     );
 
     let expected = "\
-WITH s0 AS (SELECT * FROM \"vendas\"),
-     s1 AS (SELECT * EXCEPT (\"data\", \"qtd\"), \"data\" AS \"data_venda\", \"qtd\" AS \"quantidade\" FROM s0)
-SELECT * FROM s1";
+WITH s0 AS (SELECT * FROM \"vendas\")
+SELECT * EXCEPT (\"data\", \"qtd\"), \"data\" AS \"data_venda\", \"qtd\" AS \"quantidade\" FROM s0";
 
     assert_eq!(compile(&query).unwrap(), expected);
 }
@@ -118,9 +115,8 @@ fn change_type_mapeia_todos_os_tipos() {
             }],
         );
         let expected = format!(
-            "WITH s0 AS (SELECT * FROM \"tabela\"),\n     \
-             s1 AS (SELECT * EXCEPT (\"coluna\"), CAST(\"coluna\" AS {sql_type}) AS \"coluna\" FROM s0)\n\
-             SELECT * FROM s1"
+            "WITH s0 AS (SELECT * FROM \"tabela\")\n\
+             SELECT * EXCEPT (\"coluna\"), CAST(\"coluna\" AS {sql_type}) AS \"coluna\" FROM s0"
         );
 
         assert_eq!(compile(&query).unwrap(), expected, "tipo {sql_type}");
@@ -138,9 +134,8 @@ fn sort_gera_order_by_com_direcoes() {
     );
 
     let expected = "\
-WITH s0 AS (SELECT * FROM \"vendas\"),
-     s1 AS (SELECT * FROM s0 ORDER BY \"data\" DESC, \"produto\" ASC)
-SELECT * FROM s1";
+WITH s0 AS (SELECT * FROM \"vendas\")
+SELECT * FROM s0 ORDER BY \"data\" DESC, \"produto\" ASC";
 
     assert_eq!(compile(&query).unwrap(), expected);
 }
@@ -163,9 +158,8 @@ fn group_by_com_chaves_e_todas_as_agregacoes() {
     );
 
     let expected = "\
-WITH s0 AS (SELECT * FROM \"vendas\"),
-     s1 AS (SELECT \"produto_id\", SUM(\"valor\") AS \"total\", AVG(\"valor\") AS \"media\", MIN(\"valor\") AS \"minimo\", MAX(\"valor\") AS \"maximo\", COUNT(DISTINCT \"pedido_id\") AS \"pedidos\", COUNT(*) AS \"linhas\" FROM s0 GROUP BY \"produto_id\")
-SELECT * FROM s1";
+WITH s0 AS (SELECT * FROM \"vendas\")
+SELECT \"produto_id\", SUM(\"valor\") AS \"total\", AVG(\"valor\") AS \"media\", MIN(\"valor\") AS \"minimo\", MAX(\"valor\") AS \"maximo\", COUNT(DISTINCT \"pedido_id\") AS \"pedidos\", COUNT(*) AS \"linhas\" FROM s0 GROUP BY \"produto_id\"";
 
     assert_eq!(compile(&query).unwrap(), expected);
 }
@@ -181,9 +175,8 @@ fn group_by_apenas_com_chaves_e_permitido() {
     );
 
     let expected = "\
-WITH s0 AS (SELECT * FROM \"vendas\"),
-     s1 AS (SELECT \"produto_id\" FROM s0 GROUP BY \"produto_id\")
-SELECT * FROM s1";
+WITH s0 AS (SELECT * FROM \"vendas\")
+SELECT \"produto_id\" FROM s0 GROUP BY \"produto_id\"";
 
     assert_eq!(compile(&query).unwrap(), expected);
 }
@@ -199,9 +192,8 @@ fn group_by_sem_chaves_agrega_a_tabela_inteira() {
     );
 
     let expected = "\
-WITH s0 AS (SELECT * FROM \"vendas\"),
-     s1 AS (SELECT AVG(\"valor\") AS \"media\" FROM s0)
-SELECT * FROM s1";
+WITH s0 AS (SELECT * FROM \"vendas\")
+SELECT AVG(\"valor\") AS \"media\" FROM s0";
 
     assert_eq!(compile(&query).unwrap(), expected);
 }
@@ -226,9 +218,8 @@ fn join_gera_cada_tipo_de_juncao() {
             }],
         );
         let expected = format!(
-            "WITH s0 AS (SELECT * FROM \"vendas\"),\n     \
-             s1 AS (SELECT * FROM s0 {keyword} \"produtos\" ON s0.\"produto_id\" = \"produtos\".\"id\")\n\
-             SELECT * FROM s1"
+            "WITH s0 AS (SELECT * FROM \"vendas\")\n\
+             SELECT * FROM s0 {keyword} \"produtos\" ON s0.\"produto_id\" = \"produtos\".\"id\""
         );
 
         assert_eq!(compile(&query).unwrap(), expected, "junção {keyword}");
@@ -245,9 +236,8 @@ fn append_gera_union_all() {
     );
 
     let expected = "\
-WITH s0 AS (SELECT * FROM \"vendas_2024\"),
-     s1 AS (SELECT * FROM s0 UNION ALL SELECT * FROM \"vendas_2025\")
-SELECT * FROM s1";
+WITH s0 AS (SELECT * FROM \"vendas_2024\")
+SELECT * FROM s0 UNION ALL SELECT * FROM \"vendas_2025\"";
 
     assert_eq!(compile(&query).unwrap(), expected);
 }
@@ -257,9 +247,8 @@ fn distinct_gera_select_distinct() {
     let query = query("vendas", vec![Step::Distinct]);
 
     let expected = "\
-WITH s0 AS (SELECT * FROM \"vendas\"),
-     s1 AS (SELECT DISTINCT * FROM s0)
-SELECT * FROM s1";
+WITH s0 AS (SELECT * FROM \"vendas\")
+SELECT DISTINCT * FROM s0";
 
     assert_eq!(compile(&query).unwrap(), expected);
 }
@@ -276,9 +265,8 @@ fn replace_values_usa_case_e_escapa_apostrofo() {
     );
 
     let expected = "\
-WITH s0 AS (SELECT * FROM \"vendas\"),
-     s1 AS (SELECT * EXCEPT (\"estado\"), CASE WHEN \"estado\" = 'Solteiro' THEN 'O''Brien' ELSE \"estado\" END AS \"estado\" FROM s0)
-SELECT * FROM s1";
+WITH s0 AS (SELECT * FROM \"vendas\")
+SELECT * EXCEPT (\"estado\"), CASE WHEN \"estado\" = 'Solteiro' THEN 'O''Brien' ELSE \"estado\" END AS \"estado\" FROM s0";
 
     assert_eq!(compile(&query).unwrap(), expected);
 }
@@ -293,9 +281,8 @@ fn raw_sql_troca_prev_pelo_passo_anterior() {
     );
 
     let expected = "\
-WITH s0 AS (SELECT * FROM \"vendas\"),
-     s1 AS (SELECT a, s0.b FROM s0 WHERE s0.a > 1 AND 'prev' = 'prev')
-SELECT * FROM s1";
+WITH s0 AS (SELECT * FROM \"vendas\")
+SELECT a, s0.b FROM s0 WHERE s0.a > 1 AND 'prev' = 'prev'";
 
     assert_eq!(compile(&com_prev).unwrap(), expected);
 
@@ -305,9 +292,8 @@ SELECT * FROM s1";
         vec![Step::RawSql("SELECT previous FROM prev".to_string())],
     );
     let expected = "\
-WITH s0 AS (SELECT * FROM \"vendas\"),
-     s1 AS (SELECT previous FROM s0)
-SELECT * FROM s1";
+WITH s0 AS (SELECT * FROM \"vendas\")
+SELECT previous FROM s0";
     assert_eq!(compile(&outra).unwrap(), expected);
 }
 
@@ -319,9 +305,8 @@ fn escapa_aspas_em_identificadores() {
     );
 
     let expected = "\
-WITH s0 AS (SELECT * FROM \"ve\"\"ndas\"),
-     s1 AS (SELECT \"col\"\"una\" FROM s0)
-SELECT * FROM s1";
+WITH s0 AS (SELECT * FROM \"ve\"\"ndas\")
+SELECT \"col\"\"una\" FROM s0";
 
     assert_eq!(compile(&query).unwrap(), expected);
 }

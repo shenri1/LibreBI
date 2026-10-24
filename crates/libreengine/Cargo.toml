@@ -1,0 +1,9 @@
+[package]
+name = "libreengine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+datafusion = "55.2.0"
+librequery = { version = "0.1.0", path = "../librequery" }
+tokio = { version = "1.54.1", features = ["rt", "macros"] }

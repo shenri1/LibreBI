@@ -1,8 +1,9 @@
 # librequery
 
 Biblioteca do LibreBI que descreve uma consulta como **fonte + lista de passos** e
-compila tudo em **um único texto SQL**, com uma CTE por passo. Nesta versão ela
-não executa SQL nem lê dados: só modelo e geração de SQL.
+compila tudo em **um único texto SQL**, com uma CTE por passo intermediário; o
+último passo vira o `SELECT` externo. Nesta versão ela não executa SQL nem lê
+dados: só modelo e geração de SQL.
 
 ## API
 
@@ -47,9 +48,8 @@ Saída:
 WITH s0 AS (SELECT * FROM "src_arquivo_vendas"),
      s1 AS (SELECT "data", "qtd", "preco" FROM s0),
      s2 AS (SELECT * EXCEPT ("data"), CAST("data" AS DATE) AS "data" FROM s1),
-     s3 AS (SELECT *, qtd * preco AS "valor" FROM s2),
-     s4 AS (SELECT * FROM s3 WHERE qtd > 0)
-SELECT * FROM s4
+     s3 AS (SELECT *, qtd * preco AS "valor" FROM s2)
+SELECT * FROM s3 WHERE qtd > 0
 ```
 
 ## Dialeto
@@ -60,3 +60,8 @@ apóstrofos (apóstrofos dobrados), `SELECT * EXCEPT (...)`, `CAST`, `FULL OUTER
 JOIN`, `COUNT(DISTINCT ...)` e `UNION ALL`. Expressões em `Filter`,
 `AddColumn::expr` e `RawSql` entram no SQL como texto do usuário; em `RawSql` o
 identificador `prev` aponta para o passo anterior.
+
+O último passo é emitido como `SELECT` externo, e não como CTE: assim um
+`ORDER BY` de `Sort` (ou de um `RawSql` final) ordena o resultado, já que
+motores como o DataFusion descartam a ordenação de uma subconsulta. Ordenar em
+um passo do meio da cadeia não garante a ordem final.

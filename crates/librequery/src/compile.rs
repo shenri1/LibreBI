@@ -5,12 +5,20 @@
 //! Escolhemos um subconjunto SQL simples e portável, próximo do que motores
 //! colunares modernos aceitam:
 //!
-//! - a consulta vira uma cadeia de CTEs `s0`, `s1`, ... (`WITH`), e o resultado
-//!   final é `SELECT * FROM` da última;
-//! - o CTE inicial é sempre `SELECT * FROM <fonte>`; cada passo lê o anterior;
+//! - a consulta vira uma cadeia de CTEs `s0`, `s1`, ... (`WITH`); cada passo
+//!   lê o anterior;
+//! - o **último** passo é emitido como o `SELECT` externo, não como CTE. Isso
+//!   é necessário porque motores como o DataFusion descartam `ORDER BY`
+//!   dentro de uma subconsulta: só há ordenação garantida no nível externo.
+//!   Assim `Sort` e `RawSql` (com `ORDER BY` no texto) ordenam o resultado;
+//!   uma ordenação pedida em um passo do meio da cadeia não é garantida;
+//! - o CTE inicial é sempre `SELECT * FROM <fonte>`; sem passos, o resultado é
+//!   `SELECT * FROM s0`;
 //! - identificadores (fontes, colunas) vão entre aspas duplas, dobrando aspas
 //!   internas; literais de texto vão entre apóstrofos, dobrando apóstrofos;
-//! - projeções usam `SELECT * EXCEPT (...)` para remover colunas;
+//! - projeções usam `SELECT * EXCEPT (...)` para remover colunas; por isso um
+//!   `ChangeType` ou `ReplaceValues` move a coluna convertida para o fim da
+//!   lista de colunas;
 //! - conversão de tipo usa `CAST(... AS ...)`, com `FULL OUTER JOIN` para a
 //!   junção completa e `COUNT(DISTINCT ...)` para contagem distinta;
 //! - expressões fornecidas pelo usuário (`Filter`, `AddColumn::expr` e
@@ -49,20 +57,26 @@ impl fmt::Display for CompileError {
 
 impl std::error::Error for CompileError {}
 
-/// Compila a consulta em um único texto SQL, com um CTE por passo.
+/// Compila a consulta em um único texto SQL.
 ///
+/// O primeiro CTE lê a fonte e cada passo, exceto o último, vira um CTE. O
+/// último passo é o `SELECT` externo, para que sua ordenação tenha efeito.
 /// Uma consulta sem passos é válida e gera apenas o CTE `s0`.
 pub fn compile(query: &Query) -> Result<String, CompileError> {
     if query.source.trim().is_empty() {
         return Err(CompileError::EmptySource);
     }
 
-    let mut bodies = Vec::with_capacity(query.steps.len() + 1);
-    bodies.push(format!("SELECT * FROM {}", quote_ident(&query.source)));
+    let (steps, final_step) = match query.steps.split_last() {
+        Some((last, previous_steps)) => (previous_steps, Some(last)),
+        None => (&query.steps[..], None),
+    };
 
-    for (index, step) in query.steps.iter().enumerate() {
-        let previous = format!("s{index}");
-        bodies.push(compile_step(step, &previous)?);
+    // `s0` lê a fonte; cada passo intermediário gera `s1`, `s2`, ...
+    let mut bodies = Vec::with_capacity(steps.len() + 1);
+    bodies.push(format!("SELECT * FROM {}", quote_ident(&query.source)));
+    for (index, step) in steps.iter().enumerate() {
+        bodies.push(compile_step(step, &format!("s{index}"))?);
     }
 
     let mut sql = String::new();
@@ -74,8 +88,15 @@ pub fn compile(query: &Query) -> Result<String, CompileError> {
         }
         sql.push_str(&format!("s{index} AS ({body})"));
     }
-    let last = bodies.len() - 1;
-    sql.push_str(&format!("\nSELECT * FROM s{last}"));
+
+    sql.push('\n');
+    match final_step {
+        Some(step) => {
+            let previous = format!("s{}", bodies.len() - 1);
+            sql.push_str(&compile_step(step, &previous)?);
+        }
+        None => sql.push_str("SELECT * FROM s0"),
+    }
     Ok(sql)
 }
 
