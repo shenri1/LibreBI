@@ -22,6 +22,8 @@ pub enum ProjectError {
     DuplicateId { id: String },
     /// O identificador não serve como nome de arquivo.
     InvalidId { id: String },
+    /// O caminho de uma fonte pode apontar para fora da pasta do projeto.
+    UnsafePath { source: String, path: String },
     /// Uma consulta cita uma fonte ou consulta inexistente.
     MissingReference { query: String, reference: String },
     /// As consultas dependem umas das outras em ciclo.
@@ -48,6 +50,10 @@ impl fmt::Display for ProjectError {
             ),
             Self::DuplicateId { id } => write!(f, "id duplicado: \"{id}\""),
             Self::InvalidId { id } => write!(f, "id inválido para nome de arquivo: \"{id}\""),
+            Self::UnsafePath { source, path } => write!(
+                f,
+                "caminho inseguro na fonte \"{source}\": \"{path}\" (o caminho precisa ser relativo e ficar dentro da pasta do projeto)"
+            ),
             Self::MissingReference { query, reference } => write!(
                 f,
                 "a consulta \"{query}\" referencia \"{reference}\", que não existe como fonte nem como consulta"
@@ -71,6 +77,7 @@ impl std::error::Error for ProjectError {
             Self::UnsupportedVersion { .. }
             | Self::DuplicateId { .. }
             | Self::InvalidId { .. }
+            | Self::UnsafePath { .. }
             | Self::MissingReference { .. }
             | Self::Cycle { .. } => None,
         }

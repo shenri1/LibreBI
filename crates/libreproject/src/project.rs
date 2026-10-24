@@ -54,7 +54,8 @@ impl Project {
     /// Carrega o projeto da pasta `dir`.
     ///
     /// Os arquivos são lidos em ordem de nome, e as listas resultantes ficam
-    /// ordenadas por id para que a carga seja determinística.
+    /// ordenadas por id para que a carga seja determinística. O projeto é
+    /// validado antes de ser devolvido.
     pub fn load(dir: &Path) -> Result<Project, ProjectError> {
         let project_path = dir.join(format::PROJECT_FILE);
         let file: ProjectFile = read_yaml(&project_path)?;
@@ -73,12 +74,14 @@ impl Project {
         }
         queries.sort_by(|left, right| left.id.cmp(&right.id));
 
-        migrate(Project {
+        let project = migrate(Project {
             name: file.name,
             format_version: file.format_version,
             sources,
             queries,
-        })
+        })?;
+        project.validate()?;
+        Ok(project)
     }
 
     /// Grava o projeto em `dir` no formato canônico.
@@ -123,17 +126,20 @@ impl Project {
         Ok(())
     }
 
-    /// Confere ids, referências e ciclos do projeto.
+    /// Confere ids, referências, ciclos e caminhos de fontes do projeto.
     ///
     /// As regras são: ids únicos entre fontes e consultas (sem colisão entre os
-    /// dois conjuntos); toda fonte de consulta e todo `other` de
+    /// dois conjuntos); todo `path` de fonte precisa ser relativo, não conter
+    /// `..` nem byte nulo; toda fonte de consulta e todo `other` de
     /// [`Step::Join`]/[`Step::Append`] precisa existir como fonte ou consulta;
-    /// e as consultas não podem formar ciclo.
+    /// e as consultas não podem formar ciclo. O confinamento do caminho à pasta
+    /// do projeto, já resolvido, é conferido em [`Project::open_in`].
     pub fn validate(&self) -> Result<(), ProjectError> {
         let mut ids: HashSet<&str> = HashSet::new();
 
         for source in &self.sources {
             check_id(&source.id)?;
+            check_source_path(source)?;
             if !ids.insert(source.id.as_str()) {
                 return Err(ProjectError::DuplicateId {
                     id: source.id.clone(),
@@ -189,13 +195,18 @@ impl Project {
 
     /// Registra no motor as fontes e depois as consultas do projeto.
     ///
-    /// As consultas entram na ordem de [`Project::query_order`], de modo que
-    /// `engine.run` funciona para qualquer consulta pelo seu id.
+    /// O caminho de cada fonte é resolvido junto a `dir` e canonicalizado; se o
+    /// arquivo resolvido sair da pasta canônica do projeto (por exemplo, por um
+    /// link simbólico), a abertura é recusada com
+    /// [`ProjectError::UnsafePath`]. Arquivo ausente continua gerando o erro de
+    /// registro do motor. As consultas entram na ordem de
+    /// [`Project::query_order`], de modo que `engine.run` funciona para qualquer
+    /// consulta pelo seu id.
     pub async fn open_in(&self, engine: &Engine, dir: &Path) -> Result<(), ProjectError> {
         self.validate()?;
 
         for source in &self.sources {
-            let path = dir.join(&source.path);
+            let path = resolve_source_path(dir, source)?;
             let result = match source.kind {
                 SourceKind::Csv => engine.register_csv(&source.id, &path).await,
                 SourceKind::Parquet => engine.register_parquet(&source.id, &path).await,
@@ -299,6 +310,65 @@ fn check_id(id: &str) -> Result<(), ProjectError> {
         return Err(ProjectError::InvalidId { id: id.to_string() });
     }
     Ok(())
+}
+
+/// Recusa caminhos de fonte que possam apontar para fora da pasta do projeto.
+///
+/// A regra vale em qualquer plataforma: caminho vazio, com byte nulo, com
+/// componente `..` (em `/` ou `\`) ou com forma absoluta (raiz, letra de
+/// unidade ou UNC) é recusado.
+fn check_source_path(source: &SourceDef) -> Result<(), ProjectError> {
+    let path = &source.path;
+    let unsafe_path = path.is_empty()
+        || path.contains('\0')
+        || path.split(['/', '\\']).any(|part| part == "..")
+        || looks_absolute(path);
+    if unsafe_path {
+        return Err(ProjectError::UnsafePath {
+            source: source.id.clone(),
+            path: path.clone(),
+        });
+    }
+    Ok(())
+}
+
+/// Detecta formas absolutas nativas e as formas do Windows em qualquer sistema.
+fn looks_absolute(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    let starts_with_separator = matches!(bytes.first(), Some(b'/' | b'\\'));
+    let starts_with_drive = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+    Path::new(path).is_absolute() || starts_with_separator || starts_with_drive
+}
+
+/// Resolve o caminho da fonte e confere, após canonicalizar, que fica em `dir`.
+///
+/// Se o arquivo ainda não existe, devolve o caminho apenas juntado, para que o
+/// erro de arquivo não encontrado venha do motor como antes.
+fn resolve_source_path(dir: &Path, source: &SourceDef) -> Result<PathBuf, ProjectError> {
+    let path = dir.join(&source.path);
+    let canonical_dir = fs::canonicalize(dir).map_err(|source_error| ProjectError::Io {
+        path: dir.to_path_buf(),
+        source: source_error,
+    })?;
+
+    match fs::canonicalize(&path) {
+        Ok(canonical) => {
+            if !canonical.starts_with(&canonical_dir) {
+                return Err(ProjectError::UnsafePath {
+                    source: source.id.clone(),
+                    path: source.path.clone(),
+                });
+            }
+            // Registra o caminho juntado, não o canônico: no Windows o prefixo
+            // `\\?\` da forma canônica não é aceito pelos leitores do motor.
+            Ok(path)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(path),
+        Err(source_error) => Err(ProjectError::Io {
+            path,
+            source: source_error,
+        }),
+    }
 }
 
 /// Lê e converte um arquivo YAML.

@@ -165,6 +165,162 @@ fn id_invalido_para_nome_de_arquivo() {
 }
 
 #[test]
+fn caminho_absoluto_na_fonte() {
+    for path in [
+        "/etc/passwd",
+        "\\vendas.csv",
+        "C:\\dados\\vendas.csv",
+        "\\\\servidor\\pasta\\vendas.csv",
+    ] {
+        let project = common::project(
+            "Absoluto",
+            vec![common::source("fora", SourceKind::Csv, path)],
+            vec![],
+        );
+
+        let error = project.validate().unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                ProjectError::UnsafePath { source, path: unsafe_path }
+                    if source == "fora" && unsafe_path == path
+            ),
+            "caminho absoluto aceito: {path}"
+        );
+    }
+}
+
+#[test]
+fn caminho_com_dois_pontos_no_inicio() {
+    let project = common::project(
+        "Escapa",
+        vec![common::source("fora", SourceKind::Csv, "../fora.csv")],
+        vec![],
+    );
+
+    let error = project.validate().unwrap_err();
+    assert!(matches!(
+        &error,
+        ProjectError::UnsafePath { source, path } if source == "fora" && path == "../fora.csv"
+    ));
+    assert_eq!(
+        error.to_string(),
+        "caminho inseguro na fonte \"fora\": \"../fora.csv\" (o caminho precisa ser relativo e ficar dentro da pasta do projeto)"
+    );
+}
+
+#[test]
+fn caminho_com_dois_pontos_no_meio() {
+    for path in ["dados/../../fora.csv", "dados\\..\\fora.csv"] {
+        let project = common::project(
+            "Escapa",
+            vec![common::source("fora", SourceKind::Csv, path)],
+            vec![],
+        );
+
+        let error = project.validate().unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                ProjectError::UnsafePath { source, path: unsafe_path }
+                    if source == "fora" && unsafe_path == path
+            ),
+            "caminho com .. no meio aceito: {path}"
+        );
+    }
+}
+
+#[test]
+fn caminho_vazio_na_fonte() {
+    let project = common::project(
+        "Vazio",
+        vec![common::source("fora", SourceKind::Csv, "")],
+        vec![],
+    );
+
+    let error = project.validate().unwrap_err();
+    assert!(matches!(
+        &error,
+        ProjectError::UnsafePath { source, path } if source == "fora" && path.is_empty()
+    ));
+}
+
+#[test]
+fn caminho_com_byte_nulo() {
+    let project = common::project(
+        "Nulo",
+        vec![common::source("fora", SourceKind::Csv, "dados/\0.csv")],
+        vec![],
+    );
+
+    let error = project.validate().unwrap_err();
+    assert!(matches!(&error, ProjectError::UnsafePath { source, .. } if source == "fora"));
+}
+
+#[test]
+fn load_recusa_caminho_inseguro() {
+    let dir = skeletons(1);
+    fs::write(
+        dir.path().join("sources/base.yaml"),
+        "id: base\nkind: csv\npath: ../base.csv\n",
+    )
+    .unwrap();
+
+    let error = Project::load(dir.path()).unwrap_err();
+    assert!(matches!(
+        &error,
+        ProjectError::UnsafePath { source, path } if source == "base" && path == "../base.csv"
+    ));
+}
+
+#[test]
+fn save_recusa_caminho_inseguro() {
+    let dir = TempDir::new().unwrap();
+    let project = common::project(
+        "Gravação",
+        vec![common::source("fora", SourceKind::Csv, "../fora.csv")],
+        vec![],
+    );
+
+    let error = project.save(dir.path()).unwrap_err();
+    assert!(matches!(
+        &error,
+        ProjectError::UnsafePath { source, path } if source == "fora" && path == "../fora.csv"
+    ));
+    assert!(!dir.path().join("project.yaml").exists());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn open_in_recusa_link_simbolico_que_escapa() {
+    use std::os::unix::fs::symlink;
+
+    let dir = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    fs::write(outside.path().join("fora.csv"), "a\n1\n").unwrap();
+    fs::create_dir_all(dir.path().join("dados")).unwrap();
+    symlink(
+        outside.path().join("fora.csv"),
+        dir.path().join("dados/fora.csv"),
+    )
+    .unwrap();
+
+    let project = common::project(
+        "Link",
+        vec![common::source("fora", SourceKind::Csv, "dados/fora.csv")],
+        vec![],
+    );
+    project.save(dir.path()).unwrap();
+
+    let engine = Engine::new();
+    let error = project.open_in(&engine, dir.path()).await.unwrap_err();
+    assert!(matches!(
+        &error,
+        ProjectError::UnsafePath { source, path } if source == "fora" && path == "dados/fora.csv"
+    ));
+}
+
+#[test]
 fn project_yaml_invalido() {
     let dir = skeletons(1);
     fs::write(dir.path().join("project.yaml"), "name: [\n").unwrap();

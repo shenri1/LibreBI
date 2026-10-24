@@ -4,11 +4,12 @@
 //! referências entre fontes e consultas e registra tudo no [`libreengine`] para
 //! execução. Não há interface gráfica aqui.
 //!
-//! - [`Project::load`] lê `project.yaml`, `sources/*.yaml` e `queries/*.yaml`;
+//! - [`Project::load`] lê e valida `project.yaml`, `sources/*.yaml` e `queries/*.yaml`;
 //! - [`Project::save`] grava de forma canônica e remove arquivos obsoletos;
-//! - [`Project::validate`] confere ids, referências e ciclos;
+//! - [`Project::validate`] confere ids, referências, ciclos e caminhos de fontes;
 //! - [`Project::query_order`] devolve as consultas em ordem de dependência;
-//! - [`Project::open_in`] registra fontes e consultas no motor.
+//! - [`Project::open_in`] registra fontes e consultas no motor, recusando
+//!   caminhos que escapem da pasta do projeto.
 //!
 //! O layout é uma pasta versionável em git:
 //!
