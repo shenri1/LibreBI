@@ -1,0 +1,3 @@
+id: produtos
+kind: csv
+path: data/produtos.csv

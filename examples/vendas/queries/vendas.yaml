@@ -1,0 +1,17 @@
+id: vendas
+source: arquivo_vendas
+steps:
+- op: select_columns
+  columns:
+  - data
+  - produto_id
+  - qtd
+  - preco
+- op: change_type
+  column: data
+  to: date
+- op: add_column
+  name: valor
+  expr: qtd * preco
+- op: filter
+  expr: qtd > 0

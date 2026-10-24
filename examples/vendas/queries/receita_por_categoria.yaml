@@ -1,0 +1,19 @@
+id: receita_por_categoria
+source: vendas
+steps:
+- op: join
+  kind: left
+  other: produtos
+  left_key: produto_id
+  right_key: produto_id
+- op: group_by
+  keys:
+  - categoria
+  aggregations:
+  - name: receita
+    func: sum
+    column: valor
+- op: sort
+  columns:
+  - column: categoria
+    direction: asc

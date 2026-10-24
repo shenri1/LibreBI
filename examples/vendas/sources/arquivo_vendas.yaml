@@ -1,0 +1,3 @@
+id: arquivo_vendas
+kind: csv
+path: data/vendas.csv
